@@ -1,0 +1,1835 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Digital OCR Evaluation</title>
+    <link href="https://fonts.googleapis.com/css2?family=Lobster&family=Open+Sans:wght@300;400;600&family=Roboto:wght@100;300;400;500;700;900&display=swap" rel="stylesheet">
+    <!-- html2canvas for screenshot export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <!-- PDF.js for PDF text extraction -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <!-- Marked.js for Markdown rendering -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+    <style>
+        :root {
+            --bg: #ffffff;
+            --fg: #000000;
+            --ctrl-bg: #f0f0f0;
+            --ctrl-border: #ccc;
+            --ctrl-text: #333;
+            --separator: #bbb;
+            --display-text: #555;
+            --tab-bg: #333;
+            --tab-text: #aaa;
+            --tab-active-bg: #444;
+            --tab-active-text: #fff;
+            --tab-accent: #4af;
+        }
+        body.dark-mode {
+            --bg: #1a1a1a;
+            --fg: #e0e0e0;
+            --ctrl-bg: #2a2a2a;
+            --ctrl-border: #555;
+            --ctrl-text: #ccc;
+            --separator: #555;
+            --display-text: #999;
+            --tab-bg: #111;
+            --tab-text: #888;
+            --tab-active-bg: #222;
+            --tab-active-text: #fff;
+            --tab-accent: #4af;
+        }
+        * { box-sizing: border-box; }
+        body {
+            font-family: Roboto, sans-serif;
+            margin: 0; padding: 0;
+            overflow: hidden;
+            height: 100vh;
+            background: var(--bg);
+            color: var(--fg);
+            transition: background 0.3s, color 0.3s;
+        }
+
+        /* ===== TAB BAR ===== */
+        #tabBar {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            height: 36px;
+            background: var(--tab-bg);
+            display: flex;
+            z-index: 3000;
+            align-items: stretch;
+        }
+        .tab-btn {
+            padding: 0 20px;
+            color: var(--tab-text);
+            background: var(--tab-bg);
+            border: none;
+            border-bottom: 3px solid transparent;
+            cursor: pointer;
+            font-size: 13px;
+            font-family: Roboto, sans-serif;
+            transition: all 0.15s;
+            white-space: nowrap;
+        }
+        .tab-btn:hover { color: var(--tab-active-text); background: var(--tab-active-bg); }
+        .tab-btn.active { color: var(--tab-active-text); border-bottom-color: var(--tab-accent); background: var(--tab-active-bg); }
+        #tabBarRight {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding-right: 10px;
+        }
+        #tabBarRight button {
+            background: none; border: 1px solid #666; color: #ccc;
+            padding: 3px 10px; border-radius: 3px; cursor: pointer;
+            font-size: 11px; font-family: Roboto, sans-serif;
+        }
+        #tabBarRight button:hover { background: #555; color: #fff; }
+
+        /* ===== SCREENS ===== */
+        .screen {
+            display: none;
+            position: absolute;
+            top: 36px; left: 0; right: 0; bottom: 0;
+            overflow: auto;
+        }
+        .screen.active { display: block; }
+
+        /* ===== SCREEN 1: OCR EVALUATION ===== */
+        #ocrScreen { padding: 20px; background: var(--bg); }
+
+        #controlsWrapper {
+            position: fixed;
+            top: 46px; right: 10px;
+            width: 240px;
+            z-index: 1000;
+            transition: transform 0.3s ease-in-out;
+        }
+        #controlsWrapper.folded { transform: translateX(260px); }
+        #controls {
+            background-color: var(--ctrl-bg);
+            padding: 10px;
+            border: 1px solid var(--ctrl-border);
+            border-radius: 5px;
+            font-size: 12px;
+            color: var(--ctrl-text);
+            width: 240px;
+            overflow-y: auto;
+            max-height: calc(100vh - 80px);
+        }
+        #controls > label,
+        #controls > input[type="text"],
+        #controls > input[type="number"],
+        #controls > select,
+        #controls > button,
+        #controls > textarea,
+        #controls .collapsible-content label,
+        #controls .collapsible-content input[type="text"],
+        #controls .collapsible-content button {
+            display: block;
+            margin-bottom: 8px;
+            width: 100%;
+        }
+        #controls > input[type="range"],
+        #controls .collapsible-content input[type="range"] {
+            display: block;
+            width: 100%;
+            margin-bottom: 2px;
+        }
+        #controls input[type="checkbox"] {
+            display: inline-block;
+            width: auto;
+            margin-right: 5px;
+        }
+        #controls input[type="color"] {
+            width: 40px; height: 24px;
+            border: 1px solid var(--ctrl-border);
+            border-radius: 3px;
+            padding: 1px;
+            cursor: pointer;
+            vertical-align: middle;
+        }
+        #foldButton {
+            position: absolute;
+            top: 5px; left: -25px;
+            width: 25px; height: 25px;
+            background-color: #ccc;
+            border: 1px solid #999;
+            border-radius: 3px;
+            cursor: pointer;
+            text-align: center;
+            line-height: 23px;
+            font-size: 14px;
+            z-index: 1001;
+            user-select: none;
+        }
+        #output {
+            white-space: pre-wrap;
+            margin-top: 10px;
+            padding: 10px;
+            font-size: 10pt;
+            font-family: Roboto, sans-serif;
+            line-height: normal;
+            filter: blur(0px);
+            margin-right: 260px;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            position: relative;
+        }
+        /* Noise overlay canvas */
+        #noiseCanvas {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: 5;
+            opacity: 0;
+        }
+        /* Multi-size output sections */
+        .font-size-section {
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px dashed #ccc;
+        }
+        .font-size-section:last-child { border-bottom: none; }
+        .font-size-label {
+            font-size: 9px;
+            color: #999;
+            margin-bottom: 3px;
+            font-family: monospace;
+        }
+
+        .display-value {
+            text-align: right;
+            font-size: 12px;
+            color: var(--display-text);
+            margin-bottom: 6px;
+        }
+        #imagePreview {
+            max-width: 100%; max-height: 100%;
+            display: none;
+            position: absolute;
+            cursor: move;
+            transform: translate(-50%, -50%);
+            top: 50%; left: 50%;
+        }
+        .category-label {
+            font-weight: bold;
+            margin-top: 10px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .category-label::before { content: '\25B6 '; font-size: 10px; }
+        .category-label.open::before { content: '\25BC '; font-size: 10px; }
+        .collapsible-content {
+            display: none;
+            margin-top: 5px;
+            margin-bottom: 5px;
+            padding-left: 10px;
+        }
+        .control-separator {
+            border-top: 1px solid var(--separator);
+            margin: 10px 0;
+        }
+
+        /* Pixel density info bar */
+        #pixelDensityBar {
+            position: fixed;
+            bottom: 0; left: 0; right: 0;
+            background: rgba(0,0,0,0.85);
+            color: #0f0;
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            padding: 4px 12px;
+            z-index: 2000;
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+        #pixelDensityBar span { white-space: nowrap; }
+
+        /* Font size multi-input */
+        .font-size-input-row {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 4px;
+            align-items: center;
+        }
+        .font-size-input-row input[type="number"] {
+            width: 55px; font-size: 11px;
+            padding: 2px 4px;
+            border: 1px solid var(--ctrl-border);
+            border-radius: 3px;
+            text-align: center;
+            background: var(--bg); color: var(--fg);
+        }
+        .font-size-input-row button {
+            width: 22px; height: 22px;
+            font-size: 14px; line-height: 18px;
+            padding: 0; cursor: pointer;
+            border: 1px solid var(--ctrl-border);
+            border-radius: 3px;
+            background: var(--bg); color: var(--fg);
+        }
+        .font-size-input-row button:hover { background: #eee; }
+        .font-size-input-row .remove-size { color: #c00; font-weight: bold; }
+        #addSizeBtn {
+            font-size: 11px; padding: 3px 8px;
+            cursor: pointer;
+            border: 1px dashed #999;
+            border-radius: 3px;
+            background: var(--ctrl-bg);
+            color: var(--ctrl-text);
+            margin-bottom: 8px;
+            display: block; width: 100%;
+        }
+        #addSizeBtn:hover { background: #eef; }
+        .help-text { font-size: 10px; color: #888; margin-bottom: 6px; }
+
+        /* Color picker row */
+        .color-row {
+            display: flex; align-items: center; gap: 6px;
+            margin-bottom: 6px;
+        }
+        .color-row label { font-size: 11px; margin: 0; width: auto; display: inline; }
+
+        /* Preset buttons */
+        .preset-btn {
+            font-size: 10px; padding: 3px 6px;
+            cursor: pointer;
+            border: 1px solid var(--ctrl-border);
+            border-radius: 3px;
+            background: var(--ctrl-bg);
+            color: var(--ctrl-text);
+            margin: 2px;
+        }
+        .preset-btn:hover { background: #ddf; }
+
+        /* ===== SCREEN 2: FILE VIEWER ===== */
+        #fileScreen { padding: 20px; background: var(--bg); }
+        #fileControlsWrapper {
+            position: fixed;
+            top: 46px; right: 10px;
+            width: 260px;
+            z-index: 1000;
+            transition: transform 0.3s ease-in-out;
+        }
+        #fileControlsWrapper.folded { transform: translateX(280px); }
+        #fileViewerControls {
+            background-color: var(--ctrl-bg);
+            padding: 10px;
+            border: 1px solid var(--ctrl-border);
+            border-radius: 5px;
+            font-size: 12px;
+            color: var(--ctrl-text);
+            width: 260px;
+            overflow-y: auto;
+            max-height: calc(100vh - 80px);
+        }
+        #fileViewerControls > label,
+        #fileViewerControls > input[type="text"],
+        #fileViewerControls > select,
+        #fileViewerControls > button {
+            display: block;
+            margin-bottom: 8px;
+            width: 100%;
+        }
+        #fileFoldButton {
+            position: absolute;
+            top: 5px; left: -25px;
+            width: 25px; height: 25px;
+            background-color: #ccc;
+            border: 1px solid #999;
+            border-radius: 3px;
+            cursor: pointer;
+            text-align: center;
+            line-height: 23px;
+            font-size: 14px;
+            z-index: 1001;
+            user-select: none;
+        }
+        #fileDropZone {
+            border: 2px dashed #aaa;
+            border-radius: 5px;
+            padding: 15px;
+            text-align: center;
+            cursor: pointer;
+            margin-bottom: 8px;
+            transition: background 0.2s;
+            font-size: 12px;
+            color: #666;
+        }
+        #fileDropZone:hover, #fileDropZone.dragover {
+            background: #e0e0ff;
+            border-color: #66f;
+        }
+        #fileLoadStatus {
+            font-size: 10px; color: #888;
+            margin-bottom: 8px;
+            word-break: break-all;
+        }
+        #fileViewerOutput {
+            margin-right: 280px;
+            padding: 20px;
+            min-height: calc(100vh - 80px);
+        }
+        #fileViewerOutput.rendered-content {
+            font-family: Roboto, sans-serif;
+            font-size: 14px;
+            line-height: 1.6;
+            color: var(--fg);
+        }
+        #fileViewerOutput.rendered-content h1 { font-size: 2em; font-weight: 700; margin: 0.67em 0; border-bottom: 1px solid #eee; padding-bottom: 0.3em; }
+        #fileViewerOutput.rendered-content h2 { font-size: 1.5em; font-weight: 700; margin: 0.75em 0; border-bottom: 1px solid #eee; padding-bottom: 0.2em; }
+        #fileViewerOutput.rendered-content h3 { font-size: 1.25em; font-weight: 700; margin: 0.83em 0; }
+        #fileViewerOutput.rendered-content h4 { font-size: 1.1em; font-weight: 700; margin: 1em 0; }
+        #fileViewerOutput.rendered-content h5 { font-size: 0.95em; font-weight: 700; margin: 1.2em 0; }
+        #fileViewerOutput.rendered-content h6 { font-size: 0.85em; font-weight: 700; margin: 1.4em 0; color: #555; }
+        #fileViewerOutput.rendered-content p { margin: 1em 0; }
+        #fileViewerOutput.rendered-content ul, #fileViewerOutput.rendered-content ol { margin: 1em 0; padding-left: 2em; }
+        #fileViewerOutput.rendered-content li { margin: 0.25em 0; }
+        #fileViewerOutput.rendered-content blockquote {
+            border-left: 4px solid #dfe2e5; margin: 1em 0; padding: 0.5em 1em;
+            color: #6a737d; background: #f6f8fa;
+        }
+        #fileViewerOutput.rendered-content pre {
+            background: #f6f8fa; padding: 1em; overflow-x: auto;
+            border-radius: 6px; border: 1px solid #e1e4e8; font-size: 0.9em;
+        }
+        #fileViewerOutput.rendered-content code {
+            background: #f0f0f0; padding: 0.2em 0.4em;
+            border-radius: 3px; font-family: 'Courier New', monospace; font-size: 0.9em;
+        }
+        #fileViewerOutput.rendered-content pre code { background: none; padding: 0; font-size: inherit; }
+        #fileViewerOutput.rendered-content table { border-collapse: collapse; margin: 1em 0; width: auto; }
+        #fileViewerOutput.rendered-content table th,
+        #fileViewerOutput.rendered-content table td {
+            border: 1px solid #dfe2e5; padding: 0.5em 0.75em; text-align: left;
+        }
+        #fileViewerOutput.rendered-content table th { background: #f6f8fa; font-weight: 700; }
+        #fileViewerOutput.rendered-content hr { border: none; border-top: 1px solid #e1e4e8; margin: 2em 0; }
+        #fileViewerOutput.rendered-content a { color: #0366d6; text-decoration: none; }
+        #fileViewerOutput.rendered-content a:hover { text-decoration: underline; }
+        #fileViewerOutput.rendered-content img { max-width: 100%; height: auto; }
+        #fileViewerOutput.plain-text {
+            white-space: pre-wrap;
+            font-family: 'Courier New', monospace;
+            font-size: 13px; line-height: 1.5;
+            color: var(--fg);
+        }
+        .pdf-page-container {
+            margin-bottom: 20px; background: white;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.15); padding: 20px;
+        }
+        .pdf-page-label { font-size: 11px; color: #999; margin-bottom: 8px; font-family: monospace; }
+        #fileEmptyState { text-align: center; padding: 80px 20px; color: #999; font-size: 16px; }
+        #fileEmptyState .icon { font-size: 48px; margin-bottom: 15px; }
+
+        /* Keyboard shortcut hint */
+        .shortcut-hint {
+            position: fixed;
+            bottom: 30px; left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.8);
+            color: #fff;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 12px;
+            z-index: 5000;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .shortcut-hint.visible { opacity: 1; }
+
+        /* Toast notification */
+        .toast {
+            position: fixed;
+            top: 50px; left: 50%;
+            transform: translateX(-50%);
+            background: #333;
+            color: #fff;
+            padding: 8px 20px;
+            border-radius: 6px;
+            font-size: 13px;
+            z-index: 5000;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .toast.visible { opacity: 1; }
+
+        /* ===== RESPONSIVE ===== */
+        @media (max-width: 768px) {
+            #controlsWrapper, #fileControlsWrapper {
+                position: fixed;
+                top: auto; bottom: 30px;
+                right: 0; left: 0;
+                width: 100%;
+                transform: translateY(0);
+                z-index: 1000;
+            }
+            #controlsWrapper.folded, #fileControlsWrapper.folded {
+                transform: translateY(calc(100% - 30px));
+            }
+            #controls, #fileViewerControls {
+                width: 100%;
+                max-height: 50vh;
+                border-radius: 10px 10px 0 0;
+            }
+            #foldButton, #fileFoldButton {
+                position: relative;
+                left: auto; top: auto;
+                width: 100%; height: 28px;
+                text-align: center;
+                border-radius: 10px 10px 0 0;
+                margin-bottom: 5px;
+            }
+            #output { margin-right: 10px; }
+            #fileViewerOutput { margin-right: 10px; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Toast notification -->
+    <div id="toast" class="toast"></div>
+    <!-- Keyboard shortcut hint -->
+    <div id="shortcutHint" class="shortcut-hint">
+        Ctrl+F: Fold | Ctrl+1/2: Tabs | Ctrl+E: Export | Ctrl+D: Dark Mode | Ctrl+?: Shortcuts
+    </div>
+
+    <!-- ===== TAB BAR ===== -->
+    <div id="tabBar">
+        <button class="tab-btn active" onclick="switchTab('ocr')">OCR Evaluation</button>
+        <button class="tab-btn" onclick="switchTab('file')">File Viewer</button>
+        <div id="tabBarRight">
+            <button onclick="toggleDarkMode()" title="Toggle Dark Mode (Ctrl+D)">Dark Mode</button>
+            <button onclick="showShortcuts()" title="Keyboard Shortcuts (Ctrl+?)">Shortcuts</button>
+        </div>
+    </div>
+
+    <!-- ===== SCREEN 1: OCR EVALUATION ===== -->
+    <div id="ocrScreen" class="screen active">
+        <div id="controlsWrapper">
+            <div id="foldButton" onclick="toggleFold()">&#10094;</div>
+        <div id="controls">
+
+            <button onclick="exportScreenshot()" style="margin-bottom:8px; background:#d4edda; border:1px solid #9c9; cursor:pointer; border-radius:3px; padding:5px; width:100%;">Export PNG (Ctrl+E)</button>
+
+            <div class="control-separator"></div>
+
+            <label>Write Sentence:</label>
+            <input type="text" id="sentence" oninput="generateOutput();" value="Discover the Natural Beauty of Hawaii. Hawaii, a tropical paradise located in the Pacific Ocean, is a popular destination for travelers seeking a unique blend of natural beauty, rich culture, and adventure. The state's eight main islands, including Oahu, Maui, Kauai, and the Big Island, offer a diverse range of landscapes, from lush rainforests and towering volcanoes to pristine beaches and crystal-clear waters. Visitors can explore the islands' vibrant cities, such as Honolulu and Hilo, which showcase Hawaiian history, art, and cuisine. Outdoor enthusiasts can enjoy activities like surfing, snorkeling, and hiking, while those seeking relaxation can unwind at a luxurious resort or on a secluded beach. With its warm climate, stunning scenery, and aloha spirit, Hawaii is an ideal destination for anyone looking to escape the ordinary and experience the ultimate tropical getaway. ">
+
+            <label>Row Multiplier:</label>
+            <input type="number" id="rows" value="1" min="1" oninput="generateOutput();">
+
+            <label>Column Multiplier:</label>
+            <input type="number" id="columns" value="1" min="1" oninput="generateOutput();">
+
+            <div class="control-separator"></div>
+
+            <!-- Font Sizes: multiple inputs -->
+            <label>Font Sizes:</label>
+            <div id="fontSizeList"></div>
+            <button id="addSizeBtn" onclick="addFontSizeRow()">+ Add Size</button>
+            <div class="help-text">Add multiple sizes to render text at each size separately.</div>
+
+            <label>Quick Adjust:</label>
+            <input type="range" id="fontSize" min="1" max="200" value="10" step="0.5" oninput="updateFontSizeSlider();">
+            <div id="fontSizeDisplay" class="display-value">10pt</div>
+
+            <label style="display:inline-block; width:auto;">
+                <input type="checkbox" id="usePt" onchange="updateUnitsDisplay();" checked>
+                Use pt (uncheck for px)
+            </label>
+
+            <div class="control-separator"></div>
+
+            <label>Line Spacing:</label>
+            <input type="range" id="lineSpacing" min="1" max="5" step="0.05" value="1.3" oninput="updateLineSpacing();">
+            <div id="lineSpacingDisplay" class="display-value">Line Spacing: 1.30</div>
+
+            <label>Letter Spacing:</label>
+            <input type="range" id="letterSpacing" min="-5" max="20" step="0.5" value="0" oninput="updateLetterSpacing();">
+            <div id="letterSpacingDisplay" class="display-value">Letter Spacing: 0px</div>
+
+            <label>Word Spacing:</label>
+            <input type="range" id="wordSpacing" min="-5" max="30" step="0.5" value="0" oninput="updateWordSpacing();">
+            <div id="wordSpacingDisplay" class="display-value">Word Spacing: 0px</div>
+
+            <div class="control-separator"></div>
+
+            <label>Font Type:</label>
+            <select id="fontType" onchange="updateFontType();">
+                <option value="'Roboto', sans-serif">Roboto</option>
+                <option value="Arial">Arial</option>
+                <option value="Courier New">Courier New</option>
+                <option value="Georgia">Georgia</option>
+                <option value="Times New Roman">Times New Roman</option>
+                <option value="Verdana">Verdana</option>
+                <option value="'Lobster', cursive">Lobster</option>
+                <option value="'Open Sans', sans-serif">Open Sans</option>
+                <option value="monospace">Monospace</option>
+                <option value="serif">Serif</option>
+                <option value="sans-serif">Sans-serif</option>
+            </select>
+
+            <label>Custom Google Font:</label>
+            <input type="text" id="customFont" placeholder="e.g. Noto Sans JP">
+            <button onclick="loadCustomFont()">Load Font</button>
+
+            <label>Font Weight:</label>
+            <input type="range" id="fontWeight" min="100" max="900" step="100" value="400" oninput="updateFontWeight();">
+            <div id="fontWeightDisplay" class="display-value">Font Weight: 400</div>
+
+            <div class="control-separator"></div>
+
+            <!-- Colors -->
+            <label>Colors:</label>
+            <div class="color-row">
+                <label>Text:</label>
+                <input type="color" id="textColor" value="#000000" onchange="updateColors();">
+                <label>BG:</label>
+                <input type="color" id="bgColor" value="#ffffff" onchange="updateColors();">
+            </div>
+            <label style="display:inline-block; width:auto;">
+                <input type="checkbox" id="inverseColors" onchange="toggleInverseColors();">
+                Inverse Colors
+            </label>
+
+            <div class="control-separator"></div>
+
+            <!-- Contrast (Text-BG color difference) -->
+            <label>Contrast Level:</label>
+            <input type="range" id="contrastLevel" min="0" max="100" step="1" value="100" oninput="updateContrastLevel();" onchange="updateContrastLevel();">
+            <div id="contrastLevelDisplay" class="display-value">Contrast: 100% (max)</div>
+            <div class="control-separator"></div>
+
+            <label>Blur:</label>
+            <input type="range" id="blur" min="0" max="10" step="0.1" value="0" oninput="updateBlur();">
+            <div id="blurDisplay" class="display-value">Blur: 0px</div>
+
+            <!-- Rotation -->
+            <label>Rotation:</label>
+            <input type="range" id="rotation" min="0" max="360" step="1" value="0" oninput="updateRotation();">
+            <div id="rotationDisplay" class="display-value">Rotation: 0&deg;</div>
+
+            <!-- Noise overlay -->
+            <label>Noise Overlay:</label>
+            <input type="range" id="noiseLevel" min="0" max="100" step="1" value="0" oninput="updateNoise();">
+            <div id="noiseDisplay" class="display-value">Noise: 0%</div>
+            <select id="noiseType" onchange="updateNoise();" style="margin-bottom:8px;">
+                <option value="grain">Grain</option>
+                <option value="scanline">Scan Lines</option>
+                <option value="paper">Paper Texture</option>
+            </select>
+
+            <div class="control-separator"></div>
+
+            <!-- Presets -->
+            <label>Presets:</label>
+            <div id="presetButtons" style="display:flex; flex-wrap:wrap; margin-bottom:6px;">
+                <button class="preset-btn" onclick="loadPreset('small')">Small Print</button>
+                <button class="preset-btn" onclick="loadPreset('lowcontrast')">Low Contrast</button>
+                <button class="preset-btn" onclick="loadPreset('cjk')">CJK Test</button>
+                <button class="preset-btn" onclick="loadPreset('confusable')">Confusable</button>
+                <button class="preset-btn" onclick="loadPreset('noisy')">Noisy Scan</button>
+                <button class="preset-btn" onclick="loadPreset('rotated')">Rotated</button>
+            </div>
+            <div style="display:flex; gap:4px; margin-bottom:8px;">
+                <input type="text" id="presetName" placeholder="My preset name" style="flex:1; font-size:11px; padding:3px;">
+                <button onclick="saveCustomPreset()" style="font-size:10px; padding:3px 6px; cursor:pointer; border:1px solid var(--ctrl-border); border-radius:3px; background:var(--ctrl-bg); color:var(--ctrl-text);">Save</button>
+            </div>
+            <div id="customPresets" style="display:flex; flex-wrap:wrap; margin-bottom:6px;"></div>
+
+            <div class="control-separator"></div>
+
+            <label>Upload Image:</label>
+            <input type="file" id="imageUpload" accept="image/*" onchange="loadImage()">
+
+            <label>Image URL:</label>
+            <input type="text" id="imageUrl" placeholder="Enter image URL" oninput="loadImageFromURL()">
+
+            <div class="category-label" onclick="toggleCategory('General')">General</div>
+            <div id="General" class="collapsible-content">
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/crosshair_chart.png?raw=true" onclick="showImage(this)">Crosshair chart</label>
+            </div>
+
+            <div class="category-label" onclick="toggleCategory('RGBW')">RGBW</div>
+            <div id="RGBW" class="collapsible-content">
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/blue.png?raw=true" onclick="showImage(this)">blue</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/green.png?raw=true" onclick="showImage(this)">green</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/red.png?raw=true" onclick="showImage(this)">red</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/white.png?raw=true" onclick="showImage(this)">white</label>
+            </div>
+            <div class="category-label" onclick="toggleCategory('Gamma')">Gamma</div>
+            <div id="Gamma" class="collapsible-content">
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/000000.png?raw=true" onclick="showImage(this)">000000</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/1F1F1F.png?raw=true" onclick="showImage(this)">1F1F1F</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/3F3F3F.png?raw=true" onclick="showImage(this)">3F3F3F</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/5F5F5F.png?raw=true" onclick="showImage(this)">5F5F5F</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/7F7F7F.png?raw=true" onclick="showImage(this)">7F7F7F</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/9F9F9F.png?raw=true" onclick="showImage(this)">9F9F9F</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/BFBFBF.png?raw=true" onclick="showImage(this)">BFBFBF</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/DFDFDF.png?raw=true" onclick="showImage(this)">DFDFDF</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/FFFFFF.png?raw=true" onclick="showImage(this)">FFFFFF</label>
+            </div>
+            <div class="category-label" onclick="toggleCategory('ColorChecker')">ColorChecker</div>
+            <div id="ColorChecker" class="collapsible-content">
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/1.png?raw=true" onclick="showImage(this)">1</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/2.png?raw=true" onclick="showImage(this)">2</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/3.png?raw=true" onclick="showImage(this)">3</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/4.png?raw=true" onclick="showImage(this)">4</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/5.png?raw=true" onclick="showImage(this)">5</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/6.png?raw=true" onclick="showImage(this)">6</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/7.png?raw=true" onclick="showImage(this)">7</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/8.png?raw=true" onclick="showImage(this)">8</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/9.png?raw=true" onclick="showImage(this)">9</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/10.png?raw=true" onclick="showImage(this)">10</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/11.png?raw=true" onclick="showImage(this)">11</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/12.png?raw=true" onclick="showImage(this)">12</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/13.png?raw=true" onclick="showImage(this)">13</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/14.png?raw=true" onclick="showImage(this)">14</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/15.png?raw=true" onclick="showImage(this)">15</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/16.png?raw=true" onclick="showImage(this)">16</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/17.png?raw=true" onclick="showImage(this)">17</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/18.png?raw=true" onclick="showImage(this)">18</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/19.png?raw=true" onclick="showImage(this)">19</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/20.png?raw=true" onclick="showImage(this)">20</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/21.png?raw=true" onclick="showImage(this)">21</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/22.png?raw=true" onclick="showImage(this)">22</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/23.png?raw=true" onclick="showImage(this)">23</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/24.png?raw=true" onclick="showImage(this)">24</label>
+            </div>
+            <div class="category-label" onclick="toggleCategory('sharpnessEvaluation')">Sharpness Evaluation</div>
+            <div id="sharpnessEvaluation" class="collapsible-content">
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/ISO12233_2014.png?raw=true" onclick="showImage(this)">ISO12233 2014</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/ISO12233_2014_green.png?raw=true" onclick="showImage(this)">Green ISO12233 2014</label>
+            </div>
+
+            <div class="category-label" onclick="toggleCategory('textEvaluation')">Text Evaluation</div>
+            <div id="textEvaluation" class="collapsible-content">
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/cylinder_fov_12_contrast_1.0_fontsz0.2_blur0.1_ppd60.0_idx0.png?raw=true" onclick="showImage(this)">Font size 0.2</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/cylinder_fov_12_contrast_1.0_fontsz0.3_blur0.1_ppd60.0_idx0.png?raw=true" onclick="showImage(this)">Font size 0.3</label>
+                <label><input type="checkbox" name="imageSelector" value="https://github.com/mooenaso/sentence-repeater/blob/main/data/cylinder_fov_12_contrast_1.0_fontsz0.6_blur0.1_ppd60.0_idx0.png?raw=true" onclick="showImage(this)">Font size 0.6</label>
+            </div>
+
+            <label>Image Size:</label>
+            <input type="range" id="imageSize" min="10" max="4000" value="720" oninput="resizeImage();">
+            <div id="imageSizeDisplay" class="display-value">Image Size: 720px</div>
+        </div>
+        </div>
+
+        <div id="output"><canvas id="noiseCanvas"></canvas></div>
+        <img id="imagePreview" alt="Projected Image">
+    </div>
+
+    <!-- ===== SCREEN 2: FILE VIEWER ===== -->
+    <div id="fileScreen" class="screen">
+        <div id="fileControlsWrapper">
+            <div id="fileFoldButton" onclick="toggleFileFold()">&#10094;</div>
+        <div id="fileViewerControls">
+            <div id="fileDropZone" onclick="document.getElementById('fileInput').click()">
+                <div style="font-size:28px; margin-bottom:6px;">&#128196;</div>
+                Drop file here or click to browse<br>
+                <small>PDF, Markdown (.md), Text (.txt), HTML, CSV, JSON</small>
+            </div>
+            <input type="file" id="fileInput" accept=".pdf,.md,.markdown,.txt,.text,.html,.htm,.csv,.json,.log,.xml,.rtf" style="display:none" onchange="handleFileUpload(event)">
+            <div id="fileLoadStatus"></div>
+
+            <label>File URL:</label>
+            <input type="text" id="fileUrl" placeholder="https://example.com/file.md">
+            <button onclick="loadFileFromURL()">Load URL</button>
+
+            <label>Base Font Size:</label>
+            <input type="range" id="fileBaseFontSize" min="8" max="48" value="14" step="1" oninput="updateFileBaseFontSize();">
+            <div id="fileBaseFontSizeDisplay" class="display-value">14px</div>
+
+            <label>Font Type:</label>
+            <select id="fileFontType" onchange="updateFileFontType();">
+                <option value="'Roboto', sans-serif">Roboto</option>
+                <option value="Arial">Arial</option>
+                <option value="Courier New">Courier New</option>
+                <option value="Georgia">Georgia</option>
+                <option value="Times New Roman">Times New Roman</option>
+                <option value="'Open Sans', sans-serif">Open Sans</option>
+                <option value="serif">Serif</option>
+                <option value="sans-serif">Sans-serif</option>
+            </select>
+
+            <label style="display:inline-block; width:auto;">
+                <input type="checkbox" id="fileInverseColors" onchange="toggleFileInverseColors();">
+                Inverse Colors
+            </label>
+
+            <button onclick="clearFileContent()" style="margin-top:8px; background:#f5c6c6; border:1px solid #c99; width:100%; padding:6px; cursor:pointer; border-radius:3px;">Clear File</button>
+        </div>
+        </div>
+
+        <div id="fileViewerOutput">
+            <div id="fileEmptyState">
+                <div class="icon">&#128196;</div>
+                <div>No file loaded.</div>
+                <div style="font-size:13px; margin-top:8px; color:#bbb;">Upload a PDF, Markdown, TXT, HTML, CSV, or JSON file using the panel on the right.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pixel Density Info Bar -->
+    <div id="pixelDensityBar">
+        <span id="pdb_dpr">DPR: --</span>
+        <span id="pdb_zoom">Zoom: --</span>
+        <span id="pdb_cssRes">CSS Res: --</span>
+        <span id="pdb_physRes">Phys Res: --</span>
+        <span id="pdb_cssPPI">CSS PPI: --</span>
+        <span id="pdb_physPPI">Phys PPI: --</span>
+        <span id="pdb_1ptPx">1pt = -- px</span>
+    </div>
+
+    <script>
+// ============================================================
+// ============================================================
+// TAB SWITCHING
+// ============================================================
+function switchTab(tab) {
+    document.querySelectorAll('.tab-btn').forEach(function(btn) { btn.classList.remove('active'); });
+    document.querySelectorAll('.screen').forEach(function(s) { s.classList.remove('active'); });
+    if (tab === 'ocr') {
+        document.getElementById('ocrScreen').classList.add('active');
+        document.querySelectorAll('.tab-btn')[0].classList.add('active');
+    } else {
+        document.getElementById('fileScreen').classList.add('active');
+        document.querySelectorAll('.tab-btn')[1].classList.add('active');
+    }
+}
+
+// ============================================================
+// DARK MODE
+// ============================================================
+function toggleDarkMode() {
+    document.body.classList.toggle('dark-mode');
+    showToast(document.body.classList.contains('dark-mode') ? 'Dark mode ON' : 'Dark mode OFF');
+}
+
+// ============================================================
+// TOAST NOTIFICATIONS
+// ============================================================
+function showToast(msg) {
+    var t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('visible');
+    clearTimeout(t._timer);
+    t._timer = setTimeout(function() { t.classList.remove('visible'); }, 2000);
+}
+
+// ============================================================
+// KEYBOARD SHORTCUTS
+// ============================================================
+function showShortcuts() {
+    var h = document.getElementById('shortcutHint');
+    h.classList.add('visible');
+    clearTimeout(h._timer);
+    h._timer = setTimeout(function() { h.classList.remove('visible'); }, 5000);
+}
+
+document.addEventListener('keydown', function(e) {
+    // Ignore if typing in input/textarea
+    var tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') {
+        // Allow Ctrl shortcuts even in inputs
+        if (!e.ctrlKey && !e.metaKey) return;
+    }
+
+    if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault();
+        // Fold/unfold based on active screen
+        if (document.getElementById('ocrScreen').classList.contains('active')) {
+            toggleFold();
+        } else {
+            toggleFileFold();
+        }
+    } else if ((e.ctrlKey || e.metaKey) && e.key === '1') {
+        e.preventDefault();
+        switchTab('ocr');
+    } else if ((e.ctrlKey || e.metaKey) && e.key === '2') {
+        e.preventDefault();
+        switchTab('file');
+    } else if ((e.ctrlKey || e.metaKey) && e.key === 'e') {
+        e.preventDefault();
+        exportScreenshot();
+    } else if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
+        e.preventDefault();
+        toggleDarkMode();
+    } else if ((e.ctrlKey || e.metaKey) && (e.key === '/' || e.key === '?')) {
+        e.preventDefault();
+        showShortcuts();
+    }
+});
+
+// ============================================================
+// PIXEL DENSITY / DPR ACCURACY
+// ============================================================
+var cachedDPR = window.devicePixelRatio || 1;
+var baselineDPR = window.devicePixelRatio || 1;
+
+function measurePPI() {
+    var m = document.createElement('div');
+    m.style.width = '1in'; m.style.height = '1in';
+    m.style.position = 'absolute'; m.style.left = '-9999px'; m.style.top = '-9999px';
+    m.style.visibility = 'hidden';
+    document.body.appendChild(m);
+    var ppi = m.offsetWidth;
+    document.body.removeChild(m);
+    return ppi;
+}
+
+function updatePixelDensityBar() {
+    var dpr = window.devicePixelRatio || 1;
+    cachedDPR = dpr;
+    var cssPPI = measurePPI();
+    var physPPI = cssPPI * dpr;
+    var zoomPercent = Math.round((dpr / baselineDPR) * 100);
+    var cssW = window.innerWidth, cssH = window.innerHeight;
+    var physW = Math.round(cssW * dpr), physH = Math.round(cssH * dpr);
+    var cssPxPerPt = cssPPI / 72;
+    var physPxPerPt = physPPI / 72;
+
+    document.getElementById('pdb_dpr').textContent = 'DPR: ' + dpr.toFixed(2);
+    document.getElementById('pdb_zoom').textContent = 'Zoom: ~' + zoomPercent + '%';
+    document.getElementById('pdb_cssRes').textContent = 'CSS Res: ' + cssW + 'x' + cssH;
+    document.getElementById('pdb_physRes').textContent = 'Phys Res: ' + physW + 'x' + physH;
+    document.getElementById('pdb_cssPPI').textContent = 'CSS PPI: ' + cssPPI;
+    document.getElementById('pdb_physPPI').textContent = 'Phys PPI: ' + physPPI.toFixed(1);
+    document.getElementById('pdb_1ptPx').textContent = '1pt = ' + cssPxPerPt.toFixed(2) + ' CSS px (' + physPxPerPt.toFixed(2) + ' phys px)';
+}
+
+function watchDPRChanges() {
+    var mql = window.matchMedia('(resolution: ' + window.devicePixelRatio + 'dppx)');
+    mql.addEventListener('change', function handler() {
+        updatePixelDensityBar();
+        mql.removeEventListener('change', handler);
+        watchDPRChanges();
+    });
+}
+window.addEventListener('resize', updatePixelDensityBar);
+watchDPRChanges();
+
+// ============================================================
+// OCR SCREEN: FOLD
+// ============================================================
+function toggleFold() {
+    var c = document.getElementById('controlsWrapper');
+    var b = document.getElementById('foldButton');
+    c.classList.toggle('folded');
+    if (c.classList.contains('folded')) {
+        b.innerHTML = '&#10095;';
+        document.getElementById('output').style.marginRight = '10px';
+    } else {
+        b.innerHTML = '&#10094;';
+        document.getElementById('output').style.marginRight = '260px';
+    }
+}
+
+function toggleFileFold() {
+    var c = document.getElementById('fileControlsWrapper');
+    var b = document.getElementById('fileFoldButton');
+    c.classList.toggle('folded');
+    if (c.classList.contains('folded')) {
+        b.innerHTML = '&#10095;';
+        document.getElementById('fileViewerOutput').style.marginRight = '10px';
+    } else {
+        b.innerHTML = '&#10094;';
+        document.getElementById('fileViewerOutput').style.marginRight = '280px';
+    }
+}
+
+// ============================================================
+// FONT SIZE: MULTIPLE INPUTS
+// ============================================================
+var fontSizeRows = [10];
+
+function renderFontSizeList() {
+    var container = document.getElementById('fontSizeList');
+    container.innerHTML = '';
+    var unit = document.getElementById('usePt').checked ? 'pt' : 'px';
+    fontSizeRows.forEach(function(size, idx) {
+        var row = document.createElement('div');
+        row.className = 'font-size-input-row';
+
+        var input = document.createElement('input');
+        input.type = 'number';
+        input.min = '0.5'; input.max = '200'; input.step = '0.5';
+        input.value = size;
+        input.className = 'font-size-input';
+        input.onchange = function() { fontSizeRows[idx] = parseFloat(this.value) || 10; generateOutput(); };
+        input.oninput = function() { fontSizeRows[idx] = parseFloat(this.value) || 10; generateOutput(); };
+
+        var unitLabel = document.createElement('span');
+        unitLabel.textContent = unit;
+        unitLabel.style.fontSize = '11px'; unitLabel.style.color = '#666';
+
+        row.appendChild(input);
+        row.appendChild(unitLabel);
+
+        if (fontSizeRows.length > 1) {
+            var removeBtn = document.createElement('button');
+            removeBtn.className = 'remove-size';
+            removeBtn.textContent = '\u00D7';
+            removeBtn.title = 'Remove this size';
+            removeBtn.onclick = function() { fontSizeRows.splice(idx, 1); renderFontSizeList(); generateOutput(); };
+            row.appendChild(removeBtn);
+        }
+        container.appendChild(row);
+    });
+}
+
+function addFontSizeRow() {
+    var lastSize = fontSizeRows[fontSizeRows.length - 1] || 10;
+    fontSizeRows.push(lastSize + 2);
+    renderFontSizeList();
+    generateOutput();
+}
+
+function updateFontSizeSlider() {
+    var val = parseFloat(document.getElementById('fontSize').value);
+    var unit = document.getElementById('usePt').checked ? 'pt' : 'px';
+    document.getElementById('fontSizeDisplay').textContent = val + unit;
+    if (fontSizeRows.length === 1) {
+        fontSizeRows[0] = val;
+        renderFontSizeList();
+    }
+    generateOutput();
+}
+
+function updateUnitsDisplay() {
+    var unit = document.getElementById('usePt').checked ? 'pt' : 'px';
+    var val = parseFloat(document.getElementById('fontSize').value);
+    document.getElementById('fontSizeDisplay').textContent = val + unit;
+    renderFontSizeList();
+    generateOutput();
+}
+
+function getActiveFontSizes() {
+    var inputs = document.querySelectorAll('#fontSizeList input[type="number"]');
+    var sizes = [];
+    inputs.forEach(function(inp) {
+        var v = parseFloat(inp.value);
+        if (!isNaN(v) && v > 0) sizes.push(v);
+    });
+    return sizes.length > 0 ? sizes : [10];
+}
+
+// ============================================================
+// OCR SCREEN: OTHER CONTROLS
+// ============================================================
+function updateLineSpacing() {
+    var v = parseFloat(document.getElementById('lineSpacing').value);
+    if (v < 1) v = 1;
+    document.getElementById('output').style.lineHeight = String(v);
+    document.getElementById('lineSpacingDisplay').textContent = 'Line Spacing: ' + v.toFixed(2);
+    generateOutput();
+}
+
+function updateLetterSpacing() {
+    var v = parseFloat(document.getElementById('letterSpacing').value);
+    document.getElementById('output').style.letterSpacing = v + 'px';
+    document.getElementById('letterSpacingDisplay').textContent = 'Letter Spacing: ' + v + 'px';
+}
+
+function updateWordSpacing() {
+    var v = parseFloat(document.getElementById('wordSpacing').value);
+    document.getElementById('output').style.wordSpacing = v + 'px';
+    document.getElementById('wordSpacingDisplay').textContent = 'Word Spacing: ' + v + 'px';
+}
+
+function updateFontType() {
+    document.getElementById('output').style.fontFamily = document.getElementById('fontType').value;
+    generateOutput();
+}
+
+function updateFontWeight() {
+    var v = document.getElementById('fontWeight').value;
+    document.getElementById('output').style.fontWeight = v;
+    document.getElementById('fontWeightDisplay').textContent = 'Font Weight: ' + v;
+    generateOutput();
+}
+
+function updateBlur() {
+    var blur = parseFloat(document.getElementById('blur').value);
+    document.getElementById('output').style.filter = blur > 0 ? 'blur(' + blur + 'px)' : '';
+    document.getElementById('blurDisplay').textContent = 'Blur: ' + blur + 'px';
+}
+
+function updateContrastLevel() {
+    var level = parseInt(document.getElementById('contrastLevel').value);
+    // level: 100 = full contrast (text color as-is), 0 = no contrast (text = bg)
+    var textColorHex = document.getElementById('textColor').value;
+    var bgColorHex = document.getElementById('bgColor').value;
+
+    // Parse hex colors
+    var tr = parseInt(textColorHex.substr(1,2), 16);
+    var tg = parseInt(textColorHex.substr(3,2), 16);
+    var tb = parseInt(textColorHex.substr(5,2), 16);
+    var br = parseInt(bgColorHex.substr(1,2), 16);
+    var bg2 = parseInt(bgColorHex.substr(3,2), 16);
+    var bb = parseInt(bgColorHex.substr(5,2), 16);
+
+    // Interpolate: at level=100, use text color; at level=0, use bg color
+    var factor = level / 100;
+    var nr = Math.round(br + (tr - br) * factor);
+    var ng = Math.round(bg2 + (tg - bg2) * factor);
+    var nb = Math.round(bb + (tb - bb) * factor);
+
+    var effectiveColor = 'rgb(' + nr + ',' + ng + ',' + nb + ')';
+    document.getElementById('output').style.color = effectiveColor;
+
+    // Also apply to multi-size section children
+    document.querySelectorAll('#output .font-size-section > div:last-child').forEach(function(el) {
+        el.style.color = effectiveColor;
+    });
+
+    var label = 'Contrast: ' + level + '%';
+    if (level === 100) label += ' (max)';
+    else if (level === 0) label += ' (invisible)';
+    else if (level < 20) label += ' (very low)';
+    else if (level < 50) label += ' (low)';
+    document.getElementById('contrastLevelDisplay').textContent = label;
+}
+
+function updateRotation() {
+    var v = parseFloat(document.getElementById('rotation').value);
+    document.getElementById('output').style.transform = v === 0 ? '' : 'rotate(' + v + 'deg)';
+    document.getElementById('output').style.transformOrigin = 'center center';
+    document.getElementById('rotationDisplay').innerHTML = 'Rotation: ' + v + '&deg;';
+}
+
+function updateColors() {
+    var textColor = document.getElementById('textColor').value;
+    var bgColor = document.getElementById('bgColor').value;
+    document.getElementById('ocrScreen').style.backgroundColor = bgColor;
+    // Re-apply contrast level (it computes effective color from text+bg)
+    updateContrastLevel();
+}
+
+function toggleInverseColors() {
+    var on = document.getElementById('inverseColors').checked;
+    if (on) {
+        document.getElementById('textColor').value = '#ffffff';
+        document.getElementById('bgColor').value = '#000000';
+    } else {
+        document.getElementById('textColor').value = '#000000';
+        document.getElementById('bgColor').value = '#ffffff';
+    }
+    updateColors();
+}
+
+function loadCustomFont() {
+    var name = document.getElementById('customFont').value.trim();
+    if (!name) return;
+    var link = document.createElement('link');
+    link.href = 'https://fonts.googleapis.com/css2?family=' + encodeURIComponent(name) + ':wght@100;200;300;400;500;600;700;800;900&display=swap';
+    link.rel = 'stylesheet';
+    document.head.appendChild(link);
+
+    var sel = document.getElementById('fontType');
+    var opt = document.createElement('option');
+    opt.value = "'" + name + "', sans-serif";
+    opt.textContent = name;
+    sel.appendChild(opt);
+    sel.value = opt.value;
+    updateFontType();
+    showToast('Font "' + name + '" loaded');
+}
+
+// ============================================================
+// NOISE OVERLAY
+// ============================================================
+var noiseAnimFrame = null;
+
+function updateNoise() {
+    var level = parseInt(document.getElementById('noiseLevel').value);
+    document.getElementById('noiseDisplay').textContent = 'Noise: ' + level + '%';
+    var canvas = document.getElementById('noiseCanvas');
+
+    if (level === 0) {
+        canvas.style.opacity = '0';
+        if (noiseAnimFrame) { cancelAnimationFrame(noiseAnimFrame); noiseAnimFrame = null; }
+        return;
+    }
+
+    canvas.style.opacity = String(level / 100);
+    drawNoise();
+}
+
+function drawNoise() {
+    var canvas = document.getElementById('noiseCanvas');
+    var output = document.getElementById('output');
+    canvas.width = output.offsetWidth;
+    canvas.height = output.offsetHeight;
+    var ctx = canvas.getContext('2d');
+    var type = document.getElementById('noiseType').value;
+
+    if (type === 'grain') {
+        var imgData = ctx.createImageData(canvas.width, canvas.height);
+        var data = imgData.data;
+        for (var i = 0; i < data.length; i += 4) {
+            var v = Math.random() * 255;
+            data[i] = v; data[i+1] = v; data[i+2] = v;
+            data[i+3] = Math.random() * 128;
+        }
+        ctx.putImageData(imgData, 0, 0);
+    } else if (type === 'scanline') {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+        ctx.lineWidth = 1;
+        for (var y = 0; y < canvas.height; y += 3) {
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(canvas.width, y);
+            ctx.stroke();
+        }
+    } else if (type === 'paper') {
+        var imgData2 = ctx.createImageData(canvas.width, canvas.height);
+        var d = imgData2.data;
+        for (var i = 0; i < d.length; i += 4) {
+            var v = 200 + Math.random() * 55;
+            d[i] = v; d[i+1] = v * 0.97; d[i+2] = v * 0.9;
+            d[i+3] = Math.random() * 80;
+        }
+        ctx.putImageData(imgData2, 0, 0);
+    }
+}
+
+// ============================================================
+// EXPORT SCREENSHOT
+// ============================================================
+function exportScreenshot() {
+    var output = document.getElementById('output');
+    showToast('Capturing screenshot...');
+    html2canvas(output, {
+        scale: window.devicePixelRatio || 1,
+        backgroundColor: document.getElementById('bgColor').value,
+        useCORS: true
+    }).then(function(canvas) {
+        var link = document.createElement('a');
+        link.download = 'ocr_evaluation_' + Date.now() + '.png';
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+        showToast('Screenshot exported!');
+    }).catch(function(err) {
+        showToast('Export failed: ' + err.message);
+    });
+}
+
+// ============================================================
+// PRESETS
+// ============================================================
+var BUILT_IN_PRESETS = {
+    small: { fontSize: [4, 6, 8], lineSpacing: 1.3, fontWeight: 400, blur: 0, contrast: 100, contrastLevel: 100, rotation: 0, noise: 0, textColor: '#000000', bgColor: '#ffffff', sentence: null, testSentence: 'en' },
+    lowcontrast: { fontSize: [10], lineSpacing: 1.3, fontWeight: 400, blur: 0, contrast: 100, contrastLevel: 30, rotation: 0, noise: 0, textColor: '#000000', bgColor: '#ffffff', sentence: null, testSentence: 'en' },
+    cjk: { fontSize: [10, 14], lineSpacing: 1.5, fontWeight: 400, blur: 0, contrast: 100, contrastLevel: 100, rotation: 0, noise: 0, textColor: '#000000', bgColor: '#ffffff', sentence: null, testSentence: 'en' },
+    confusable: { fontSize: [10, 14, 18], lineSpacing: 1.3, fontWeight: 400, blur: 0, contrast: 100, contrastLevel: 100, rotation: 0, noise: 0, textColor: '#000000', bgColor: '#ffffff', sentence: null, testSentence: 'confusable' },
+    noisy: { fontSize: [12], lineSpacing: 1.3, fontWeight: 400, blur: 0.3, contrast: 90, contrastLevel: 80, rotation: 0, noise: 40, textColor: '#222222', bgColor: '#f5f0e0', sentence: null, testSentence: 'en' },
+    rotated: { fontSize: [12], lineSpacing: 1.3, fontWeight: 400, blur: 0, contrast: 100, contrastLevel: 100, rotation: 5, noise: 0, textColor: '#000000', bgColor: '#ffffff', sentence: null, testSentence: 'en' }
+};
+
+function loadPreset(name) {
+    var p = BUILT_IN_PRESETS[name];
+    if (!p) {
+        // Check custom presets
+        var customs = JSON.parse(localStorage.getItem('ocrCustomPresets') || '{}');
+        p = customs[name];
+    }
+    if (!p) return;
+
+    fontSizeRows = p.fontSize.slice();
+    renderFontSizeList();
+    document.getElementById('fontSize').value = p.fontSize[0];
+    document.getElementById('fontSizeDisplay').textContent = p.fontSize[0] + (document.getElementById('usePt').checked ? 'pt' : 'px');
+
+    document.getElementById('lineSpacing').value = p.lineSpacing;
+    updateLineSpacing();
+    document.getElementById('fontWeight').value = p.fontWeight;
+    updateFontWeight();
+    document.getElementById('blur').value = p.blur;
+    updateBlur();
+    document.getElementById('rotation').value = p.rotation;
+    updateRotation();
+    document.getElementById('noiseLevel').value = p.noise;
+    updateNoise();
+    document.getElementById('textColor').value = p.textColor;
+    document.getElementById('bgColor').value = p.bgColor;
+    document.getElementById('contrastLevel').value = p.contrastLevel !== undefined ? p.contrastLevel : 100;
+    updateColors();
+
+
+    if (p.sentence) {
+        document.getElementById('sentence').value = p.sentence;
+    }
+
+    generateOutput();
+    showToast('Preset "' + name + '" loaded');
+}
+
+function saveCustomPreset() {
+    var name = document.getElementById('presetName').value.trim();
+    if (!name) { showToast('Enter a preset name'); return; }
+
+    var customs = JSON.parse(localStorage.getItem('ocrCustomPresets') || '{}');
+    customs[name] = getCurrentConfig();
+    localStorage.setItem('ocrCustomPresets', JSON.stringify(customs));
+    renderCustomPresets();
+    document.getElementById('presetName').value = '';
+    showToast('Preset "' + name + '" saved');
+}
+
+function getCurrentConfig() {
+    return {
+        fontSize: getActiveFontSizes(),
+        lineSpacing: parseFloat(document.getElementById('lineSpacing').value),
+        fontWeight: parseInt(document.getElementById('fontWeight').value),
+        blur: parseFloat(document.getElementById('blur').value),
+        contrastLevel: parseInt(document.getElementById('contrastLevel').value),
+        rotation: parseFloat(document.getElementById('rotation').value),
+        noise: parseInt(document.getElementById('noiseLevel').value),
+        textColor: document.getElementById('textColor').value,
+        bgColor: document.getElementById('bgColor').value,
+        sentence: document.getElementById('sentence').value
+    };
+}
+
+function renderCustomPresets() {
+    var container = document.getElementById('customPresets');
+    container.innerHTML = '';
+    var customs = JSON.parse(localStorage.getItem('ocrCustomPresets') || '{}');
+    Object.keys(customs).forEach(function(name) {
+        var btn = document.createElement('button');
+        btn.className = 'preset-btn';
+        btn.textContent = name;
+        btn.onclick = function() { loadPreset(name); };
+
+        var del = document.createElement('button');
+        del.className = 'preset-btn';
+        del.textContent = '\u00D7';
+        del.style.color = '#c00';
+        del.style.marginLeft = '0';
+        del.title = 'Delete preset';
+        del.onclick = function(e) {
+            e.stopPropagation();
+            var c = JSON.parse(localStorage.getItem('ocrCustomPresets') || '{}');
+            delete c[name];
+            localStorage.setItem('ocrCustomPresets', JSON.stringify(c));
+            renderCustomPresets();
+            showToast('Preset "' + name + '" deleted');
+        };
+
+        container.appendChild(btn);
+        container.appendChild(del);
+    });
+}
+
+// ============================================================
+// GENERATE OUTPUT
+// ============================================================
+function generateOutput() {
+    var sentence = document.getElementById('sentence').value;
+    var rows = parseInt(document.getElementById('rows').value) || 1;
+    var columns = parseInt(document.getElementById('columns').value) || 1;
+    var unit = document.getElementById('usePt').checked ? 'pt' : 'px';
+    var sizes = getActiveFontSizes();
+    var lineH = parseFloat(document.getElementById('lineSpacing').value);
+    if (lineH < 1) lineH = 1;
+    var outputEl = document.getElementById('output');
+
+    // Preserve the noise canvas
+    var noiseCanvas = document.getElementById('noiseCanvas');
+
+    if (sizes.length === 1) {
+        var out = '';
+        for (var i = 0; i < rows; i++) {
+            out += sentence.repeat(columns) + '\n';
+        }
+        // Clear everything except the canvas
+        while (outputEl.firstChild) {
+            if (outputEl.firstChild === noiseCanvas) break;
+            outputEl.removeChild(outputEl.firstChild);
+        }
+        // Remove everything after canvas too
+        while (noiseCanvas.nextSibling) {
+            outputEl.removeChild(noiseCanvas.nextSibling);
+        }
+
+        var textNode = document.createTextNode(out);
+        outputEl.insertBefore(textNode, noiseCanvas);
+        outputEl.style.fontSize = sizes[0] + unit;
+        outputEl.style.lineHeight = String(lineH);
+    } else {
+        // Multi-size mode
+        while (outputEl.firstChild) {
+            if (outputEl.firstChild === noiseCanvas) break;
+            outputEl.removeChild(outputEl.firstChild);
+        }
+        while (noiseCanvas.nextSibling) {
+            outputEl.removeChild(noiseCanvas.nextSibling);
+        }
+
+        sizes.forEach(function(size) {
+            var section = document.createElement('div');
+            section.className = 'font-size-section';
+
+            var label = document.createElement('div');
+            label.className = 'font-size-label';
+            label.textContent = size + unit;
+            section.appendChild(label);
+
+            var content = document.createElement('div');
+            content.style.fontSize = size + unit;
+            content.style.fontFamily = document.getElementById('fontType').value;
+            content.style.fontWeight = document.getElementById('fontWeight').value;
+            content.style.lineHeight = String(lineH);
+            content.style.whiteSpace = 'pre-wrap';
+
+            var out = '';
+            for (var i = 0; i < rows; i++) {
+                out += sentence.repeat(columns) + '\n';
+            }
+            content.textContent = out;
+            section.appendChild(content);
+            outputEl.insertBefore(section, noiseCanvas);
+        });
+    }
+    updatePixelDensityBar();
+    // Redraw noise if active
+    if (parseInt(document.getElementById('noiseLevel').value) > 0) {
+        setTimeout(drawNoise, 50);
+    }
+}
+
+// ============================================================
+// IMAGE CONTROLS
+// ============================================================
+function showImage(checkbox) {
+    var all = document.querySelectorAll('input[name="imageSelector"]');
+    var img = document.getElementById('imagePreview');
+    var sz = document.getElementById('imageSize').value;
+    all.forEach(function(cb) { if (cb !== checkbox) cb.checked = false; });
+    if (checkbox.checked) {
+        img.src = checkbox.value;
+        img.style.display = 'block';
+        img.style.width = sz + 'px';
+    } else {
+        img.style.display = 'none';
+    }
+}
+
+function loadImage() {
+    var file = document.getElementById('imageUpload').files[0];
+    var reader = new FileReader();
+    reader.onload = function(e) {
+        var img = document.getElementById('imagePreview');
+        img.src = e.target.result;
+        img.style.display = 'block';
+        resizeImage();
+        enableImageDragging(img);
+    };
+    if (file) reader.readAsDataURL(file);
+}
+
+function loadImageFromURL() {
+    var url = document.getElementById('imageUrl').value;
+    if (url) {
+        var img = document.getElementById('imagePreview');
+        img.src = url;
+        img.style.display = 'block';
+        resizeImage();
+        enableImageDragging(img);
+    }
+}
+
+function resizeImage() {
+    var sz = document.getElementById('imageSize').value;
+    var img = document.getElementById('imagePreview');
+    img.style.width = sz + 'px';
+    document.getElementById('imageSizeDisplay').textContent = 'Image Size: ' + sz + 'px';
+}
+
+function toggleCategory(id) {
+    var el = document.getElementById(id);
+    var vis = el.style.display === 'block';
+    el.style.display = vis ? 'none' : 'block';
+    document.querySelectorAll('.category-label').forEach(function(lbl) {
+        if (lbl.getAttribute('onclick') && lbl.getAttribute('onclick').indexOf(id) !== -1) {
+            lbl.classList.toggle('open', !vis);
+        }
+    });
+}
+
+function enableImageDragging(image) {
+    var posX = 0, posY = 0, mouseX = 0, mouseY = 0;
+    image.onmousedown = function(e) {
+        e.preventDefault();
+        mouseX = e.clientX; mouseY = e.clientY;
+        document.onmouseup = function() { document.onmouseup = null; document.onmousemove = null; };
+        document.onmousemove = function(e) {
+            e.preventDefault();
+            posX = mouseX - e.clientX; posY = mouseY - e.clientY;
+            mouseX = e.clientX; mouseY = e.clientY;
+            image.style.top = (image.offsetTop - posY) + 'px';
+            image.style.left = (image.offsetLeft - posX) + 'px';
+        };
+    };
+}
+enableImageDragging(document.getElementById('imagePreview'));
+
+// ============================================================
+// FILE VIEWER SCREEN
+// ============================================================
+var loadedFileContent = null;
+var loadedFileType = null;
+var loadedFileName = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+    var dz = document.getElementById('fileDropZone');
+    if (!dz) return;
+    dz.addEventListener('dragover', function(e) { e.preventDefault(); e.stopPropagation(); dz.classList.add('dragover'); });
+    dz.addEventListener('dragleave', function(e) { e.preventDefault(); e.stopPropagation(); dz.classList.remove('dragover'); });
+    dz.addEventListener('drop', function(e) {
+        e.preventDefault(); e.stopPropagation(); dz.classList.remove('dragover');
+        if (e.dataTransfer.files.length > 0) processFile(e.dataTransfer.files[0]);
+    });
+});
+
+function handleFileUpload(event) {
+    var file = event.target.files[0];
+    if (file) processFile(file);
+}
+
+function processFile(file) {
+    var ext = file.name.toLowerCase().split('.').pop();
+    loadedFileName = file.name;
+    document.getElementById('fileLoadStatus').textContent = 'Loading: ' + file.name + '...';
+
+    if (ext === 'pdf') {
+        loadPDF(file);
+    } else if (ext === 'md' || ext === 'markdown') {
+        loadTextFile(file, 'markdown');
+    } else if (ext === 'html' || ext === 'htm') {
+        loadTextFile(file, 'html');
+    } else {
+        loadTextFile(file, 'text');
+    }
+}
+
+function loadTextFile(file, type) {
+    var reader = new FileReader();
+    reader.onload = function(e) {
+        loadedFileContent = e.target.result;
+        loadedFileType = type;
+        document.getElementById('fileLoadStatus').textContent = 'Loaded: ' + loadedFileName + ' (' + type + ', ' + formatBytes(file.size) + ')';
+        renderFileViewer();
+    };
+    reader.onerror = function() {
+        document.getElementById('fileLoadStatus').textContent = 'Error reading file.';
+    };
+    reader.readAsText(file);
+}
+
+function loadPDF(file) {
+    var reader = new FileReader();
+    reader.onload = function(e) {
+        var typedArray = new Uint8Array(e.target.result);
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        pdfjsLib.getDocument(typedArray).promise.then(function(pdf) {
+            var promises = [];
+            for (var i = 1; i <= pdf.numPages; i++) {
+                promises.push(
+                    pdf.getPage(i).then(function(page) {
+                        return page.getTextContent().then(function(tc) {
+                            var lines = [];
+                            var currentLine = { y: null, items: [] };
+                            tc.items.forEach(function(item) {
+                                if (currentLine.y !== null && Math.abs(item.transform[5] - currentLine.y) > 2) {
+                                    lines.push(currentLine);
+                                    currentLine = { y: item.transform[5], items: [] };
+                                }
+                                if (currentLine.y === null) currentLine.y = item.transform[5];
+                                currentLine.items.push({
+                                    str: item.str,
+                                    fontSize: Math.abs(item.transform[0]) || 12,
+                                    fontName: item.fontName || ''
+                                });
+                            });
+                            if (currentLine.items.length > 0) lines.push(currentLine);
+                            return lines;
+                        });
+                    })
+                );
+            }
+            return Promise.all(promises);
+        }).then(function(pages) {
+            loadedFileContent = pages;
+            loadedFileType = 'pdf';
+            document.getElementById('fileLoadStatus').textContent = 'Loaded: ' + loadedFileName + ' (PDF, ' + pages.length + ' pages, ' + formatBytes(file.size) + ')';
+            renderFileViewer();
+        }).catch(function(err) {
+            document.getElementById('fileLoadStatus').textContent = 'Error loading PDF: ' + err.message;
+        });
+    };
+    reader.readAsArrayBuffer(file);
+}
+
+function loadFileFromURL() {
+    var url = document.getElementById('fileUrl').value.trim();
+    if (!url) return;
+    document.getElementById('fileLoadStatus').textContent = 'Fetching: ' + url + '...';
+
+    var urlLower = url.toLowerCase();
+    var type = 'text';
+    if (urlLower.match(/\.md($|\?)/)) type = 'markdown';
+    else if (urlLower.match(/\.html?($|\?)/)) type = 'html';
+    else if (urlLower.match(/\.pdf($|\?)/)) type = 'pdf';
+
+    if (type === 'pdf') {
+        fetch(url).then(function(r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.arrayBuffer();
+        }).then(function(buf) {
+            var typedArray = new Uint8Array(buf);
+            loadedFileName = url.split('/').pop() || 'remote.pdf';
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+            return pdfjsLib.getDocument(typedArray).promise.then(function(pdf) {
+                var promises = [];
+                for (var i = 1; i <= pdf.numPages; i++) {
+                    promises.push(
+                        pdf.getPage(i).then(function(page) {
+                            return page.getTextContent().then(function(tc) {
+                                var lines = [];
+                                var currentLine = { y: null, items: [] };
+                                tc.items.forEach(function(item) {
+                                    if (currentLine.y !== null && Math.abs(item.transform[5] - currentLine.y) > 2) {
+                                        lines.push(currentLine);
+                                        currentLine = { y: item.transform[5], items: [] };
+                                    }
+                                    if (currentLine.y === null) currentLine.y = item.transform[5];
+                                    currentLine.items.push({
+                                        str: item.str,
+                                        fontSize: Math.abs(item.transform[0]) || 12,
+                                        fontName: item.fontName || ''
+                                    });
+                                });
+                                if (currentLine.items.length > 0) lines.push(currentLine);
+                                return lines;
+                            });
+                        })
+                    );
+                }
+                return Promise.all(promises);
+            });
+        }).then(function(pages) {
+            loadedFileContent = pages;
+            loadedFileType = 'pdf';
+            document.getElementById('fileLoadStatus').textContent = 'Loaded: ' + loadedFileName + ' (PDF, ' + pages.length + ' pages)';
+            renderFileViewer();
+        }).catch(function(err) {
+            document.getElementById('fileLoadStatus').textContent = 'Error: ' + err.message;
+        });
+    } else {
+        fetch(url).then(function(r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.text();
+        }).then(function(text) {
+            loadedFileContent = text;
+            loadedFileType = type;
+            loadedFileName = url.split('/').pop() || 'remote-file';
+            document.getElementById('fileLoadStatus').textContent = 'Loaded: ' + loadedFileName + ' (' + type + ', ' + formatBytes(text.length) + ')';
+            renderFileViewer();
+        }).catch(function(err) {
+            document.getElementById('fileLoadStatus').textContent = 'Error: ' + err.message;
+        });
+    }
+}
+
+function renderFileViewer() {
+    var out = document.getElementById('fileViewerOutput');
+    if (!loadedFileContent) {
+        out.innerHTML = '<div id="fileEmptyState"><div class="icon">&#128196;</div><div>No file loaded.</div></div>';
+        out.className = '';
+        return;
+    }
+
+    if (loadedFileType === 'markdown') {
+        out.className = 'rendered-content';
+        out.innerHTML = marked.parse(loadedFileContent);
+    } else if (loadedFileType === 'html') {
+        out.className = 'rendered-content';
+        out.innerHTML = loadedFileContent;
+    } else if (loadedFileType === 'pdf') {
+        out.className = '';
+        out.innerHTML = '';
+        loadedFileContent.forEach(function(pageLines, pageIdx) {
+            var pageDiv = document.createElement('div');
+            pageDiv.className = 'pdf-page-container';
+
+            var pageLabel = document.createElement('div');
+            pageLabel.className = 'pdf-page-label';
+            pageLabel.textContent = 'Page ' + (pageIdx + 1);
+            pageDiv.appendChild(pageLabel);
+
+            pageLines.forEach(function(line) {
+                var lineDiv = document.createElement('div');
+                lineDiv.style.marginBottom = '2px';
+                line.items.forEach(function(item) {
+                    var span = document.createElement('span');
+                    span.textContent = item.str;
+                    span.style.fontSize = item.fontSize + 'px';
+                    if (item.fontName && item.fontName.toLowerCase().indexOf('bold') !== -1) {
+                        span.style.fontWeight = 'bold';
+                    }
+                    if (item.fontName && item.fontName.toLowerCase().indexOf('italic') !== -1) {
+                        span.style.fontStyle = 'italic';
+                    }
+                    lineDiv.appendChild(span);
+                });
+                pageDiv.appendChild(lineDiv);
+            });
+            out.appendChild(pageDiv);
+        });
+    } else {
+        out.className = 'plain-text';
+        out.textContent = loadedFileContent;
+    }
+}
+
+function clearFileContent() {
+    loadedFileContent = null;
+    loadedFileType = null;
+    loadedFileName = null;
+    document.getElementById('fileLoadStatus').textContent = '';
+    document.getElementById('fileUrl').value = '';
+    document.getElementById('fileInput').value = '';
+    renderFileViewer();
+}
+
+function updateFileBaseFontSize() {
+    var v = document.getElementById('fileBaseFontSize').value;
+    document.getElementById('fileBaseFontSizeDisplay').textContent = v + 'px';
+    document.getElementById('fileViewerOutput').style.fontSize = v + 'px';
+}
+
+function updateFileFontType() {
+    document.getElementById('fileViewerOutput').style.fontFamily = document.getElementById('fileFontType').value;
+}
+
+function toggleFileInverseColors() {
+    var on = document.getElementById('fileInverseColors').checked;
+    document.getElementById('fileScreen').style.backgroundColor = on ? '#1a1a1a' : '';
+    document.getElementById('fileViewerOutput').style.color = on ? '#ddd' : '';
+    document.querySelectorAll('.pdf-page-container').forEach(function(el) {
+        el.style.backgroundColor = on ? '#2a2a2a' : 'white';
+        el.style.color = on ? '#ddd' : '#333';
+    });
+}
+
+function formatBytes(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+// ============================================================
+// URL PARAMETER SUPPORT
+// ============================================================
+function loadFromURL() {
+    var params = new URLSearchParams(window.location.search);
+    if (params.has('font')) {
+        var fontVal = params.get('font');
+        var sel = document.getElementById('fontType');
+        var found = false;
+        for (var i = 0; i < sel.options.length; i++) {
+            if (sel.options[i].textContent.toLowerCase() === fontVal.toLowerCase()) {
+                sel.selectedIndex = i;
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            // Try loading as custom Google Font
+            document.getElementById('customFont').value = fontVal;
+            loadCustomFont();
+        }
+        updateFontType();
+    }
+    if (params.has('size')) {
+        var sizes = params.get('size').split(',').map(function(s) { return parseFloat(s.trim()); }).filter(function(v) { return !isNaN(v) && v > 0; });
+        if (sizes.length > 0) {
+            fontSizeRows = sizes;
+            renderFontSizeList();
+            document.getElementById('fontSize').value = sizes[0];
+            document.getElementById('fontSizeDisplay').textContent = sizes[0] + (document.getElementById('usePt').checked ? 'pt' : 'px');
+        }
+    }
+    if (params.has('rows')) document.getElementById('rows').value = parseInt(params.get('rows')) || 1;
+    if (params.has('cols')) document.getElementById('columns').value = parseInt(params.get('cols')) || 1;
+    if (params.has('weight')) { document.getElementById('fontWeight').value = parseInt(params.get('weight')) || 400; updateFontWeight(); }
+    if (params.has('line')) { document.getElementById('lineSpacing').value = parseFloat(params.get('line')) || 1.3; updateLineSpacing(); }
+    if (params.has('letter')) { document.getElementById('letterSpacing').value = parseFloat(params.get('letter')) || 0; updateLetterSpacing(); }
+    if (params.has('word')) { document.getElementById('wordSpacing').value = parseFloat(params.get('word')) || 0; updateWordSpacing(); }
+    if (params.has('blur')) { document.getElementById('blur').value = parseFloat(params.get('blur')) || 0; updateBlur(); }
+    if (params.has('clevel')) { document.getElementById('contrastLevel').value = parseInt(params.get('clevel')) || 100; updateContrastLevel(); }
+    if (params.has('rotation')) { document.getElementById('rotation').value = parseFloat(params.get('rotation')) || 0; updateRotation(); }
+    if (params.has('noise')) { document.getElementById('noiseLevel').value = parseInt(params.get('noise')) || 0; updateNoise(); }
+    if (params.has('fg')) { document.getElementById('textColor').value = '#' + params.get('fg'); updateColors(); }
+    if (params.has('bg')) { document.getElementById('bgColor').value = '#' + params.get('bg'); updateColors(); }
+    if (params.has('text')) document.getElementById('sentence').value = params.get('text');
+
+    if (params.has('tab')) switchTab(params.get('tab'));
+    if (params.has('dark') && params.get('dark') === '1') toggleDarkMode();
+}
+
+function generateShareURL() {
+    var base = window.location.origin + window.location.pathname;
+    var p = new URLSearchParams();
+    var sizes = getActiveFontSizes();
+    p.set('size', sizes.join(','));
+    p.set('rows', document.getElementById('rows').value);
+    p.set('cols', document.getElementById('columns').value);
+    p.set('weight', document.getElementById('fontWeight').value);
+    p.set('line', document.getElementById('lineSpacing').value);
+    p.set('letter', document.getElementById('letterSpacing').value);
+    p.set('word', document.getElementById('wordSpacing').value);
+    p.set('blur', document.getElementById('blur').value);
+    p.set('clevel', document.getElementById('contrastLevel').value);
+    p.set('rotation', document.getElementById('rotation').value);
+    p.set('noise', document.getElementById('noiseLevel').value);
+    p.set('fg', document.getElementById('textColor').value.replace('#', ''));
+    p.set('bg', document.getElementById('bgColor').value.replace('#', ''));
+    if (document.body.classList.contains('dark-mode')) p.set('dark', '1');
+    return base + '?' + p.toString();
+}
+
+// ============================================================
+// INITIALIZATION
+// ============================================================
+window.onload = function() {
+    renderFontSizeList();
+    renderCustomPresets();
+    updatePixelDensityBar();
+    updateLineSpacing();
+    updateLetterSpacing();
+    updateWordSpacing();
+    updateContrastLevel();
+    updateBlur();
+    updateRotation();
+    loadFromURL();
+    generateOutput();
+};
+
+    </script>
+
+</body>
+</html>
