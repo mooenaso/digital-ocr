@@ -428,6 +428,8 @@
         #fileEmptyState { text-align: center; padding: 80px 20px; color: #999; font-size: 16px; }
         #fileEmptyState .icon { font-size: 48px; margin-bottom: 15px; }
 
+
+
         /* Keyboard shortcut hint */
         .shortcut-hint {
             position: fixed;
@@ -505,6 +507,7 @@
     <div id="tabBar">
         <button class="tab-btn active" onclick="switchTab('ocr')">OCR Evaluation</button>
         <button class="tab-btn" onclick="switchTab('file')">File Viewer</button>
+
         <div id="tabBarRight">
             <button onclick="toggleDarkMode()" title="Toggle Dark Mode (Ctrl+D)">Dark Mode</button>
             <button onclick="showShortcuts()" title="Keyboard Shortcuts (Ctrl+?)">Shortcuts</button>
@@ -648,6 +651,18 @@
 
             <div class="control-separator"></div>
 
+            <!-- Compare with Website -->
+            <label>Compare with Website:</label>
+            <div style="display:flex; gap:4px; margin-bottom:4px;">
+                <input type="text" id="compareUrl" placeholder="https://techcrunch.com" style="flex:1; font-size:11px; padding:3px; font-family:'Courier New',monospace;">
+                <button onclick="openCompareTab()" style="font-size:10px; padding:3px 8px; cursor:pointer; border:1px solid var(--ctrl-border); border-radius:3px; background:#4af; color:#fff; border:none; white-space:nowrap;">Open in New Tab</button>
+            </div>
+            <div style="font-size:10px; color:var(--display-text); line-height:1.5; margin-bottom:8px; padding:6px 8px; background:rgba(0,0,0,0.03); border-radius:4px; border:1px dashed var(--ctrl-border);">
+                <strong>Tip — Chrome Split View:</strong> After opening the reference site in a new tab, right-click the tab and select <em>"New split view with current tab"</em> to view both pages side-by-side within a single Chrome window.
+            </div>
+
+            <div class="control-separator"></div>
+
             <label>Upload Image:</label>
             <input type="file" id="imageUpload" accept="image/*" onchange="loadImage()">
 
@@ -779,6 +794,8 @@
         </div>
     </div>
 
+
+
     <!-- Pixel Density Info Bar -->
     <div id="pixelDensityBar">
         <span id="pdb_dpr">DPR: --</span>
@@ -801,7 +818,7 @@ function switchTab(tab) {
     if (tab === 'ocr') {
         document.getElementById('ocrScreen').classList.add('active');
         document.querySelectorAll('.tab-btn')[0].classList.add('active');
-    } else {
+    } else if (tab === 'file') {
         document.getElementById('fileScreen').classList.add('active');
         document.querySelectorAll('.tab-btn')[1].classList.add('active');
     }
@@ -1810,6 +1827,20 @@ function generateShareURL() {
     p.set('bg', document.getElementById('bgColor').value.replace('#', ''));
     if (document.body.classList.contains('dark-mode')) p.set('dark', '1');
     return base + '?' + p.toString();
+}
+
+
+
+// ============================================================
+// COMPARE WITH WEBSITE
+// ============================================================
+function openCompareTab() {
+    var url = document.getElementById('compareUrl').value.trim();
+    if (!url) { url = 'https://techcrunch.com'; document.getElementById('compareUrl').value = url; }
+    if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+    document.getElementById('compareUrl').value = url;
+    window.open(url, '_blank');
+    showToast('Opened in new tab — use Chrome Split View (right-click tab) to compare side-by-side');
 }
 
 // ============================================================
