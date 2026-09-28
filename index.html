@@ -179,6 +179,15 @@
             overflow-wrap: break-word;
             position: relative;
         }
+        /* Vertical alignment: output fills the visible screen height so content can sit at middle/bottom */
+        #output.valign-middle,
+        #output.valign-bottom {
+            display: flex;
+            flex-direction: column;
+            min-height: calc(100vh - 86px); /* 36px tab bar + 40px screen padding + 10px margin-top */
+        }
+        #output.valign-middle { justify-content: center; }
+        #output.valign-bottom { justify-content: flex-end; }
         /* Noise overlay canvas */
         #noiseCanvas {
             position: absolute;
@@ -556,6 +565,13 @@
                 <button onclick="setTextAlign('center')" id="alignCenter" class="align-btn" style="flex:1; padding:4px; border:1px solid var(--ctrl-border); border-radius:3px; cursor:pointer; font-size:11px; background:var(--ctrl-bg); color:var(--fg);">Center</button>
                 <button onclick="setTextAlign('right')" id="alignRight" class="align-btn" style="flex:1; padding:4px; border:1px solid var(--ctrl-border); border-radius:3px; cursor:pointer; font-size:11px; background:var(--ctrl-bg); color:var(--fg);">Right &#x2192;</button>
                 <button onclick="setTextAlign('justify')" id="alignJustify" class="align-btn" style="flex:1; padding:4px; border:1px solid var(--ctrl-border); border-radius:3px; cursor:pointer; font-size:11px; background:var(--ctrl-bg); color:var(--fg);">Justify</button>
+            </div>
+
+            <label>Vertical Alignment:</label>
+            <div id="verticalAlignGroup" style="display:flex; gap:4px; margin-bottom:8px;">
+                <button onclick="setVerticalAlign('top')" id="valignTop" class="align-btn" style="flex:1; padding:4px; border:1px solid var(--ctrl-border); border-radius:3px; cursor:pointer; font-size:11px; background:var(--ctrl-bg); color:var(--fg);">&#x2191; Top</button>
+                <button onclick="setVerticalAlign('middle')" id="valignMiddle" class="align-btn" style="flex:1; padding:4px; border:1px solid var(--ctrl-border); border-radius:3px; cursor:pointer; font-size:11px; background:var(--ctrl-bg); color:var(--fg);">Middle</button>
+                <button onclick="setVerticalAlign('bottom')" id="valignBottom" class="align-btn" style="flex:1; padding:4px; border:1px solid var(--ctrl-border); border-radius:3px; cursor:pointer; font-size:11px; background:var(--ctrl-bg); color:var(--fg);">Bottom &#x2193;</button>
             </div>
 
             <div class="control-separator"></div>
@@ -1039,6 +1055,33 @@ function setTextAlign(align) {
     generateOutput();
 }
 
+var currentVerticalAlign = 'top';
+
+function setVerticalAlign(valign) {
+    if (['top', 'middle', 'bottom'].indexOf(valign) === -1) valign = 'top';
+    currentVerticalAlign = valign;
+    var btns = document.querySelectorAll('#verticalAlignGroup .align-btn');
+    btns.forEach(function(btn) {
+        btn.style.background = 'var(--ctrl-bg)';
+        btn.style.color = 'var(--fg)';
+        btn.style.fontWeight = 'normal';
+    });
+    var activeId = 'valign' + valign.charAt(0).toUpperCase() + valign.slice(1);
+    var activeBtn = document.getElementById(activeId);
+    if (activeBtn) {
+        activeBtn.style.background = '#4a90d9';
+        activeBtn.style.color = '#fff';
+        activeBtn.style.fontWeight = 'bold';
+    }
+    var outputEl = document.getElementById('output');
+    outputEl.classList.remove('valign-top', 'valign-middle', 'valign-bottom');
+    outputEl.classList.add('valign-' + valign);
+    // Output height may have changed; redraw noise to cover it
+    if (parseInt(document.getElementById('noiseLevel').value) > 0) {
+        setTimeout(drawNoise, 50);
+    }
+}
+
 function resetAll() {
     document.getElementById('sentence').value = 'Discover the Natural Beauty of Hawaii. Hawaii, a tropical paradise located in the Pacific Ocean, is a popular destination for travelers seeking a unique blend of natural beauty, rich culture, and adventure. The state\'s eight main islands, including Oahu, Maui, Kauai, and the Big Island, offer a diverse range of landscapes, from lush rainforests and towering volcanoes to pristine beaches and crystal-clear waters. Visitors can explore the islands\' vibrant cities, such as Honolulu and Hilo, which showcase Hawaiian history, art, and cuisine. Outdoor enthusiasts can enjoy activities like surfing, snorkeling, and hiking, while those seeking relaxation can unwind at a luxurious resort or on a secluded beach. With its warm climate, stunning scenery, and aloha spirit, Hawaii is an ideal destination for anyone looking to escape the ordinary and experience the ultimate tropical getaway. ';
     document.getElementById('rows').value = 1;
@@ -1062,6 +1105,7 @@ function resetAll() {
     document.getElementById('bgColor').value = '#ffffff';
     document.getElementById('inverseColors').checked = false;
     setTextAlign('left');
+    setVerticalAlign('top');
     updateLineSpacing();
     updateLetterSpacing();
     updateWordSpacing();
@@ -1455,6 +1499,7 @@ function applyConfig(p) {
     if (p.bgColor !== undefined) document.getElementById('bgColor').value = p.bgColor;
     if (p.inverse !== undefined) document.getElementById('inverseColors').checked = p.inverse;
     if (p.textAlign !== undefined) setTextAlign(p.textAlign);
+    setVerticalAlign(p.verticalAlign || 'top');
     updateColors();
     generateOutput();
 }
@@ -1491,7 +1536,8 @@ function getCurrentConfig() {
         textColor: document.getElementById('textColor').value,
         bgColor: document.getElementById('bgColor').value,
         inverse: document.getElementById('inverseColors').checked,
-        textAlign: currentTextAlign || 'left'
+        textAlign: currentTextAlign || 'left',
+        verticalAlign: currentVerticalAlign || 'top'
     };
 }
 
@@ -1984,6 +2030,7 @@ function loadFromURL() {
     if (params.has('text')) document.getElementById('sentence').value = params.get('text');
 
     if (params.has('align')) setTextAlign(params.get('align'));
+    if (params.has('valign')) setVerticalAlign(params.get('valign'));
     if (params.has('tab')) switchTab(params.get('tab'));
     if (params.has('dark') && params.get('dark') === '1') toggleDarkMode();
 }
@@ -2006,6 +2053,7 @@ function generateShareURL() {
     p.set('fg', document.getElementById('textColor').value.replace('#', ''));
     p.set('bg', document.getElementById('bgColor').value.replace('#', ''));
     if (currentTextAlign && currentTextAlign !== 'left') p.set('align', currentTextAlign);
+    if (currentVerticalAlign && currentVerticalAlign !== 'top') p.set('valign', currentVerticalAlign);
     if (document.body.classList.contains('dark-mode')) p.set('dark', '1');
     return base + '?' + p.toString();
 }
@@ -2038,6 +2086,7 @@ window.onload = function() {
     updateBlur();
     updateRotation();
     setTextAlign('left');
+    setVerticalAlign('top');
     loadFromURL();
     generateOutput();
     // Initialize fold button icons for mobile
